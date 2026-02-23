@@ -140,6 +140,8 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 - Built with [Claude](https://www.anthropic.com/claude) by Anthropic
 - Inspired by the need for media literacy in an increasingly complex information landscape
+- This project was entirely vibe-coded
+- Developed with [Maestro] (https://github.com/RunMaestro/Maestro/) Huge thanks to @pedramamini for this awesome environment!
 
 ---
 
