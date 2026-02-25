@@ -569,6 +569,10 @@ function App() {
                 setShowLanguage(prev => ({ ...prev, [id]: 'translated' }))
                 setHasUnsavedChanges(true)
               }}
+              onCheckFakeNews={async (id) => {
+                await articleHooks.checkFakeNews(id)
+                setHasUnsavedChanges(true)
+              }}
               onAddArticle={() => setShowWizard(true)}
               onAddToGroup={(id) => setShowGroupModal(id)}
               onMergeCluster={(clusterId) => setShowMergeModal(clusterId)}
@@ -599,6 +603,9 @@ function App() {
               onTranslate={async (id) => {
                 await articleHooks.translateArticle(id, translateLanguage)
                 setShowLanguage(prev => ({ ...prev, [id]: 'translated' }))
+              }}
+              onCheckFakeNews={async (id) => {
+                await articleHooks.checkFakeNews(id)
               }}
               onAddToGroup={(id) => setShowGroupModal(id)}
               onMergeCluster={(clusterId) => setShowMergeModal(clusterId)}
@@ -961,6 +968,7 @@ function FeedView({
   onDelete,
   onAnalyze,
   onTranslate,
+  onCheckFakeNews,
   onAddArticle,
   onAddToGroup,
   onMergeCluster,
@@ -981,6 +989,7 @@ function FeedView({
   onDelete: (id: string) => void
   onAnalyze: (id: string) => void
   onTranslate: (id: string) => void
+  onCheckFakeNews?: (id: string) => void
   onAddArticle?: () => void
   onAddToGroup?: (id: string) => void
   onMergeCluster?: (clusterId: string) => void
@@ -997,6 +1006,7 @@ function FeedView({
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
   const [analyzingId, setAnalyzingId] = useState<string | null>(null)
   const [translatingId, setTranslatingId] = useState<string | null>(null)
+  const [checkingFakeNewsId, setCheckingFakeNewsId] = useState<string | null>(null)
 
   // Filter by topic, trending, search, and source
   const filteredArticles = useMemo(() => {
@@ -1052,16 +1062,11 @@ function FeedView({
       ...ungrouped.map(a => ({ clusterId: '', articles: [a] }))
     ]
 
-    // Sort: multi-article groups first, then by date
+    // Sort by date (most recent first)
     return result.sort((a, b) => {
-      // First priority: groups with more articles
-      if (a.articles.length > 1 && b.articles.length === 1) return -1
-      if (a.articles.length === 1 && b.articles.length > 1) return 1
-      // Second priority: larger groups first
-      if (a.articles.length !== b.articles.length) return b.articles.length - a.articles.length
-      // Third priority: by date
-      const dateA = new Date(a.articles[0].publishedAt).getTime()
-      const dateB = new Date(b.articles[0].publishedAt).getTime()
+      // Get the most recent article date from each group
+      const dateA = Math.max(...a.articles.map(art => new Date(art.publishedAt).getTime()))
+      const dateB = Math.max(...b.articles.map(art => new Date(art.publishedAt).getTime()))
       return dateB - dateA
     })
   }, [filteredArticles, groupByStory])
@@ -1078,6 +1083,13 @@ function FeedView({
     setTranslatingId(id)
     await onTranslate(id)
     setTranslatingId(null)
+  }
+
+  const handleCheckFakeNews = async (id: string) => {
+    if (!onCheckFakeNews) return
+    setCheckingFakeNewsId(id)
+    await onCheckFakeNews(id)
+    setCheckingFakeNewsId(null)
   }
 
   return (
@@ -1163,10 +1175,12 @@ function FeedView({
                       onDelete={() => onDelete(article.id)}
                       onAnalyze={() => handleAnalyze(article.id)}
                       onTranslate={() => handleTranslate(article.id)}
+                      onCheckFakeNews={onCheckFakeNews ? () => handleCheckFakeNews(article.id) : undefined}
                       onAddToGroup={onAddToGroup ? () => onAddToGroup(article.id) : undefined}
                       isGrouped={group.articles.length > 1}
                       isAnalyzing={analyzingId === article.id}
                       isTranslating={translatingId === article.id}
+                      isCheckingFakeNews={checkingFakeNewsId === article.id}
                       targetLanguage={targetLanguage}
                     />
                   ))}
@@ -1190,11 +1204,13 @@ function ArticleCard({
   onAnalyze,
   onTranslate,
   onAnalyzeImage,
+  onCheckFakeNews,
   onAddToGroup,
   isGrouped,
   isAnalyzing = false,
   isTranslating = false,
   isAnalyzingImage = false,
+  isCheckingFakeNews = false,
   targetLanguage = 'en'
 }: {
   article: Article
@@ -1205,11 +1221,13 @@ function ArticleCard({
   onAnalyze: () => void
   onTranslate: () => void
   onAnalyzeImage?: () => void
+  onCheckFakeNews?: () => void
   onAddToGroup?: () => void
   isGrouped: boolean
   isAnalyzing?: boolean
   isTranslating?: boolean
   isAnalyzingImage?: boolean
+  isCheckingFakeNews?: boolean
   targetLanguage?: string
 }) {
   const country = getCountryByCode(article.country)
@@ -1288,18 +1306,44 @@ function ArticleCard({
         {displayContent.substring(0, 250)}...
       </p>
 
-      {/* PROMINENT Fake News Warning - Stand out more */}
-      {article.fakeNewsScore !== undefined && article.fakeNewsScore > 30 && (
-        <div className={`fake-news-alert ${article.fakeNewsScore > 70 ? 'critical' : article.fakeNewsScore > 50 ? 'high' : 'moderate'}`}>
-          <span className="fake-news-icon">⚠️</span>
-          <span className="fake-news-label">
-            {article.fakeNewsScore > 70 ? 'HIGH MISINFORMATION RISK' :
-             article.fakeNewsScore > 50 ? 'ELEVATED MISINFORMATION RISK' :
-             'POTENTIAL MISINFORMATION'}
-          </span>
-          <span className="fake-news-score">{article.fakeNewsScore}%</span>
-        </div>
-      )}
+      {/* Fake News Status - Always visible */}
+      <div className={`fake-news-status ${
+        article.fakeNewsScore === undefined ? 'not-checked' :
+        article.fakeNewsScore > 70 ? 'critical' :
+        article.fakeNewsScore > 50 ? 'high' :
+        article.fakeNewsScore > 30 ? 'moderate' : 'ok'
+      }`}>
+        {article.fakeNewsScore === undefined ? (
+          <>
+            <span className="fake-news-icon">❓</span>
+            <span className="fake-news-label">Misinfo check not run</span>
+          </>
+        ) : article.fakeNewsScore > 70 ? (
+          <>
+            <span className="fake-news-icon">🚨</span>
+            <span className="fake-news-label">HIGH MISINFORMATION RISK</span>
+            <span className="fake-news-score">{article.fakeNewsScore}%</span>
+          </>
+        ) : article.fakeNewsScore > 50 ? (
+          <>
+            <span className="fake-news-icon">⚠️</span>
+            <span className="fake-news-label">ELEVATED MISINFORMATION RISK</span>
+            <span className="fake-news-score">{article.fakeNewsScore}%</span>
+          </>
+        ) : article.fakeNewsScore > 30 ? (
+          <>
+            <span className="fake-news-icon">⚠️</span>
+            <span className="fake-news-label">POTENTIAL MISINFORMATION</span>
+            <span className="fake-news-score">{article.fakeNewsScore}%</span>
+          </>
+        ) : (
+          <>
+            <span className="fake-news-icon">✅</span>
+            <span className="fake-news-label">Low Misinformation Risk</span>
+            <span className="fake-news-score">{article.fakeNewsScore}%</span>
+          </>
+        )}
+      </div>
 
       {/* Indicators Row */}
       <div className="article-indicators">
@@ -1314,11 +1358,6 @@ function ArticleCard({
         {article.biasAnalysis && (
           <span className="indicator bias" title={article.biasAnalysis.explanation}>
             Bias: {article.biasAnalysis.score > 0.3 ? 'Right' : article.biasAnalysis.score < -0.3 ? 'Left' : 'Center'}
-          </span>
-        )}
-        {article.fakeNewsScore !== undefined && article.fakeNewsScore <= 30 && (
-          <span className="indicator fake ok" title="Low misinformation risk">
-            ✓ Low Misinfo Risk
           </span>
         )}
         {article.imageAnalysis && (
@@ -1401,6 +1440,15 @@ function ArticleCard({
             {isAnalyzingImage ? <><span className="btn-spinner-sm" /> Checking...</> : '🖼️ Check Image'}
           </button>
         )}
+        {article.fakeNewsScore === undefined && onCheckFakeNews && (
+          <button
+            onClick={onCheckFakeNews}
+            disabled={isCheckingFakeNews}
+            className={isCheckingFakeNews ? 'working' : 'check-fake-news'}
+          >
+            {isCheckingFakeNews ? <><span className="btn-spinner-sm" /> Checking...</> : '🔍 Check Misinfo'}
+          </button>
+        )}
         <button className="delete" onClick={onDelete}>Delete</button>
       </div>
     </article>
@@ -1459,7 +1507,8 @@ function CorrelationView({
         a.source.toLowerCase().includes(query)
       )
     }
-    return result
+    // Sort by date (most recent first)
+    return result.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())
   }, [articles, searchQuery, selectedSource, selectedTopic])
 
   // Generate suggested cross-regional analyses

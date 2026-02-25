@@ -407,17 +407,19 @@ body {
 
 .article-actions {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px;
   margin-top: 12px;
 }
 
 .article-actions button {
-  padding: 6px 10px;
+  padding: 4px 8px;
   border: 1px solid var(--border);
   background: white;
-  font-size: 11px;
+  font-size: 10px;
   cursor: pointer;
   font-family: sans-serif;
+  white-space: nowrap;
 }
 
 .article-actions button:hover { background: var(--bg); }
@@ -788,6 +790,7 @@ body {
 
 .correlation-selector {
   display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 16px;
   margin-bottom: 24px;
 }
@@ -1147,9 +1150,9 @@ body {
 
 /* Grouped Articles */
 .articles-grouped {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
 }
 
 .article-group {
@@ -1157,7 +1160,9 @@ body {
   border: 1px solid var(--border);
 }
 
+/* Multi-article groups span full width */
 .article-group.multi {
+  grid-column: 1 / -1;
   border-left: 3px solid var(--accent);
 }
 
@@ -1315,6 +1320,16 @@ body {
 
 .article-actions button.delete:hover {
   background: #ffebee;
+}
+
+.article-actions button.check-fake-news {
+  color: #ff6b35;
+  border-color: #ff6b35;
+  font-weight: 500;
+}
+
+.article-actions button.check-fake-news:hover {
+  background: #fff3e0;
 }
 
 /* Modal */
@@ -2360,57 +2375,76 @@ button.working {
   font-weight: 600;
 }
 
-/* ===== PROMINENT FAKE NEWS ALERT ===== */
-.fake-news-alert {
+/* ===== FAKE NEWS STATUS (Always visible) ===== */
+.fake-news-status {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 14px;
-  margin: 12px 0;
+  padding: 8px 12px;
+  margin: 10px 0;
   font-family: sans-serif;
-  font-weight: 700;
+  font-weight: 600;
   border-radius: 4px;
-  animation: fake-news-pulse 2s ease-in-out infinite;
+  font-size: 11px;
 }
 
-.fake-news-alert.critical {
-  background: linear-gradient(135deg, #b71c1c, #c62828);
-  color: white;
-  border: 2px solid #7f0000;
-  box-shadow: 0 2px 8px rgba(183, 28, 28, 0.4);
+.fake-news-status.not-checked {
+  background: #f5f5f5;
+  color: #757575;
+  border: 1px dashed #bdbdbd;
 }
 
-.fake-news-alert.high {
-  background: linear-gradient(135deg, #e65100, #ff6d00);
-  color: white;
-  border: 2px solid #bf360c;
-  box-shadow: 0 2px 8px rgba(230, 81, 0, 0.4);
+.fake-news-status.ok {
+  background: #e8f5e9;
+  color: #2e7d32;
+  border: 1px solid #81c784;
 }
 
-.fake-news-alert.moderate {
+.fake-news-status.moderate {
   background: #fff3e0;
   color: #e65100;
   border: 2px solid #ff9800;
 }
 
-.fake-news-icon {
-  font-size: 18px;
+.fake-news-status.high {
+  background: linear-gradient(135deg, #e65100, #ff6d00);
+  color: white;
+  border: 2px solid #bf360c;
+  box-shadow: 0 2px 6px rgba(230, 81, 0, 0.3);
+  animation: fake-news-pulse 2s ease-in-out infinite;
 }
 
-.fake-news-label {
-  flex: 1;
-  font-size: 12px;
-  letter-spacing: 0.5px;
+.fake-news-status.critical {
+  background: linear-gradient(135deg, #b71c1c, #c62828);
+  color: white;
+  border: 2px solid #7f0000;
+  box-shadow: 0 2px 8px rgba(183, 28, 28, 0.4);
+  animation: fake-news-pulse 2s ease-in-out infinite;
 }
 
-.fake-news-score {
+.fake-news-status .fake-news-icon {
   font-size: 16px;
-  padding: 2px 8px;
-  background: rgba(255,255,255,0.2);
-  border-radius: 4px;
 }
 
-.fake-news-alert.moderate .fake-news-score {
+.fake-news-status .fake-news-label {
+  flex: 1;
+  font-size: 11px;
+  letter-spacing: 0.3px;
+}
+
+.fake-news-status .fake-news-score {
+  font-size: 13px;
+  font-weight: 700;
+  padding: 2px 6px;
+  background: rgba(255,255,255,0.2);
+  border-radius: 3px;
+}
+
+.fake-news-status.ok .fake-news-score {
+  background: rgba(0,0,0,0.1);
+}
+
+.fake-news-status.moderate .fake-news-score {
   background: rgba(0,0,0,0.1);
 }
 

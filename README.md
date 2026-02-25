@@ -4,6 +4,37 @@
 
 LibreNews is an open-source desktop application that helps users understand how news stories are covered differently across countries, political orientations, and media sources. By aggregating news from multiple international sources and leveraging AI analysis, LibreNews empowers users to see beyond their local media bubble and develop a more nuanced understanding of global events.
 
+## Screenshots
+
+### News Feed - Tile View
+Browse articles from multiple international sources in a clean, responsive tile layout. Each article shows source trust ratings, political orientation, and misinformation status at a glance.
+
+![News Feed Ungrouped](screenshots/NewsFeedOverviewUngrouped.png)
+
+### News Feed - Grouped by Story
+Related articles from different sources are automatically grouped together, making it easy to compare coverage of the same event.
+
+![News Feed Grouped](screenshots/NewsFeedOverviewGrouped.png)
+
+![News Feed Grouped Detail](screenshots/NewsFeedOverviewGrouped2.png)
+
+### Cross-Regional Analysis
+Select articles from different countries and political orientations to run AI-powered comparative analysis. See how the same story is framed differently across regions.
+
+![Cross Regional Analysis Selection](screenshots/CrossRegionalView1.png)
+
+![Cross Regional Analysis Results](screenshots/CrossRegionalView2.png)
+
+### API Transparency Log
+Full visibility into every AI operation, including token usage and costs. Know exactly what you're spending.
+
+![API Transparency Log](screenshots/APITransparencyLog.png)
+
+### Settings & Configuration
+Configure API credentials, cost controls, and manage your news sources.
+
+![Settings](screenshots/Settings1.png)
+
 ## Motivation
 
 In an era of increasing media fragmentation and polarization, it's more important than ever to understand how the same story can be framed differently depending on who's telling it. LibreNews was born from the belief that:
@@ -141,7 +172,7 @@ MIT License - see [LICENSE](LICENSE) for details.
 - Built with [Claude](https://www.anthropic.com/claude) by Anthropic
 - Inspired by the need for media literacy in an increasingly complex information landscape
 - This project was entirely vibe-coded
-- Developed with [Maestro] (https://github.com/RunMaestro/Maestro/) Huge thanks to @pedramamini for this awesome environment!
+- Developed with [Maestro](https://github.com/RunMaestro/Maestro/) Huge thanks to @pedramamini for this awesome environment!
 
 ---
 

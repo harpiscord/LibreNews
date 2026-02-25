@@ -164,6 +164,7 @@ Return ONLY valid JSON.`
 }
 
 export async function detectFakeNews(content: string): Promise<{
+  score: number
   isFake: boolean
   confidence: number
   redFlags: string[]
@@ -173,6 +174,7 @@ export async function detectFakeNews(content: string): Promise<{
 
 Return JSON:
 {
+  "score": <0-100 misinformation risk score>,
   "isFake": <boolean>,
   "confidence": <0-1>,
   "redFlags": ["<concerns>"],
@@ -190,9 +192,14 @@ Return ONLY valid JSON.`
     if (jsonStr.startsWith('```')) {
       jsonStr = jsonStr.replace(/^```json?\n?/, '').replace(/\n?```$/, '')
     }
-    return JSON.parse(jsonStr)
+    const parsed = JSON.parse(jsonStr)
+    // Ensure score exists - calculate from confidence if not provided
+    if (parsed.score === undefined) {
+      parsed.score = parsed.isFake ? Math.round(parsed.confidence * 100) : Math.round((1 - parsed.confidence) * 30)
+    }
+    return parsed
   } catch {
-    return { isFake: false, confidence: 0.5, redFlags: [], explanation: 'Unable to parse' }
+    return { score: 50, isFake: false, confidence: 0.5, redFlags: [], explanation: 'Unable to parse' }
   }
 }
 
