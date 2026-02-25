@@ -291,6 +291,10 @@ export function useArticles() {
     setIsLoading(true)
     try {
       const result = await detectFakeNews(article.content)
+      // Save the fake news score to the article
+      const updated = { ...article, fakeNewsScore: result.score }
+      await saveArticle(updated)
+      setArticles(prev => prev.map(a => a.id === articleId ? updated : a))
       return result
     } catch (err) {
       setError(String(err))

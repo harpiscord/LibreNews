@@ -70,6 +70,15 @@ function App() {
     if (saved) {
       setCustomFeeds(JSON.parse(saved))
     }
+    // Load analysis history from localStorage
+    const savedAnalyses = localStorage.getItem('librenews-analysis-history')
+    if (savedAnalyses) {
+      try {
+        setAnalysisResults(JSON.parse(savedAnalyses))
+      } catch (e) {
+        console.error('Failed to load analysis history:', e)
+      }
+    }
   }, [])
 
   useEffect(() => {
@@ -145,7 +154,12 @@ function App() {
         ...result
       }
 
-      setAnalysisResults(prev => [analysisResult, ...prev])
+      setAnalysisResults(prev => {
+        const newResults = [analysisResult, ...prev]
+        // Persist to localStorage
+        localStorage.setItem('librenews-analysis-history', JSON.stringify(newResults))
+        return newResults
+      })
       setCurrentAnalysisResult(analysisResult)
     } catch (err) {
       console.error('Analysis failed:', err)
@@ -1418,7 +1432,8 @@ function CorrelationView({
   selectedTopic?: string
 }) {
   const [selected, setSelected] = useState<string[]>([])
-  const [viewMode, setViewMode] = useState<'select' | 'result'>('select')
+  const [viewMode, setViewMode] = useState<'select' | 'result' | 'history'>('select')
+  const [showAllHistory, setShowAllHistory] = useState(false)
 
   // Switch to result view when analysis completes
   useEffect(() => {
@@ -1449,7 +1464,7 @@ function CorrelationView({
 
   // Generate suggested cross-regional analyses
   const suggestedAnalyses = useMemo(() => {
-    const suggestions: Array<{ title: string; description: string; articleIds: string[]; countries: string[] }> = []
+    const suggestions: Array<{ title: string; description: string; articleIds: string[]; countries: string[]; topic: string; confidence: number }> = []
 
     // Find clusters with articles from multiple countries
     const clusterMap: Record<string, Article[]> = {}
@@ -1460,22 +1475,62 @@ function CorrelationView({
       }
     }
 
-    // Suggest analysis for multi-country clusters
-    for (const [, clusterArticles] of Object.entries(clusterMap)) {
+    // Suggest analysis for multi-country clusters with topic validation
+    for (const [clusterId, clusterArticles] of Object.entries(clusterMap)) {
       const uniqueCountries = [...new Set(clusterArticles.map(a => a.country))]
-      if (uniqueCountries.length >= 2) {
-        const countryNames = uniqueCountries.map(c => getCountryByCode(c)?.name || c).join(', ')
-        suggestions.push({
-          title: clusterArticles[0].title.substring(0, 60) + '...',
-          description: `Compare coverage from ${countryNames}`,
-          articleIds: clusterArticles.map(a => a.id),
-          countries: uniqueCountries
-        })
+
+      // Only suggest if articles are from multiple countries
+      if (uniqueCountries.length < 2) continue
+
+      // Validate topic consistency - all articles should have the same topic
+      const topics = clusterArticles.map(a => a.topic).filter(Boolean)
+      const topicCounts: Record<string, number> = {}
+      for (const topic of topics) {
+        topicCounts[topic] = (topicCounts[topic] || 0) + 1
       }
+
+      // Find the dominant topic
+      const dominantTopic = Object.entries(topicCounts).sort((a, b) => b[1] - a[1])[0]
+      const topicConsistency = dominantTopic ? dominantTopic[1] / clusterArticles.length : 0
+
+      // Skip if less than 60% of articles share the same topic
+      if (topicConsistency < 0.6) continue
+
+      // Additional validation: check for keyword overlap in titles
+      const titleWords = clusterArticles.map(a =>
+        new Set(a.title.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 4))
+      )
+
+      // Find common words across all titles
+      let commonWords = new Set(titleWords[0])
+      for (let i = 1; i < titleWords.length; i++) {
+        commonWords = new Set([...commonWords].filter(w => titleWords[i].has(w)))
+      }
+
+      // Require at least one significant common word, or same topic with high confidence
+      const avgTopicConfidence = clusterArticles.reduce((sum, a) => sum + (a.topicConfidence || 0), 0) / clusterArticles.length
+      if (commonWords.size === 0 && avgTopicConfidence < 0.7) continue
+
+      const countryNames = uniqueCountries.map(c => getCountryByCode(c)?.name || c).join(', ')
+      const clusterName = clusterArticles[0].clusterName || clusterArticles[0].title.substring(0, 60) + '...'
+
+      suggestions.push({
+        title: clusterName,
+        description: `Compare coverage from ${countryNames}`,
+        articleIds: clusterArticles.map(a => a.id),
+        countries: uniqueCountries,
+        topic: dominantTopic ? dominantTopic[0] : 'unknown',
+        confidence: Math.max(topicConsistency, avgTopicConfidence)
+      })
     }
 
-    // Sort by number of countries (more diverse first)
-    return suggestions.sort((a, b) => b.countries.length - a.countries.length).slice(0, 5)
+    // Sort by confidence first, then by number of countries
+    return suggestions
+      .sort((a, b) => {
+        if (Math.abs(a.confidence - b.confidence) > 0.1) return b.confidence - a.confidence
+        return b.countries.length - a.countries.length
+      })
+      .slice(0, 5)
   }, [articles])
 
   const toggle = (id: string) => {
@@ -1486,6 +1541,62 @@ function CorrelationView({
     if (selected.length >= 2) {
       onAnalyze(selected)
     }
+  }
+
+  // Render full history view
+  if (viewMode === 'history') {
+    return (
+      <div className="correlation-page">
+        <div className="analysis-header">
+          <button className="back-btn" onClick={() => setViewMode('select')}>
+            ← Back to Selection
+          </button>
+          <h2>Analysis History</h2>
+          <span className="history-count">{analysisHistory.length} analyses</span>
+        </div>
+
+        <div className="full-history-list">
+          {analysisHistory.length === 0 ? (
+            <div className="empty-history">
+              <p>No previous analyses yet.</p>
+              <p>Select articles and run a cross-regional analysis to see results here.</p>
+            </div>
+          ) : (
+            analysisHistory.map(result => (
+              <div
+                key={result.id}
+                className="history-card"
+                onClick={() => { onViewResult?.(result); setViewMode('result') }}
+              >
+                <div className="history-card-header">
+                  <h4>{result.topic}</h4>
+                  <span className="history-card-date">
+                    {new Date(result.timestamp).toLocaleString()}
+                  </span>
+                </div>
+                <div className="history-card-meta">
+                  <span className="history-card-articles">
+                    {result.articles.length} articles analyzed
+                  </span>
+                  <span className="history-card-countries">
+                    {Object.keys(result.perspectivesByCountry).length} countries compared
+                  </span>
+                </div>
+                <p className="history-card-preview">
+                  {result.analysis.substring(0, 150)}...
+                </p>
+                <div className="history-card-countries-flags">
+                  {Object.keys(result.perspectivesByCountry).map(countryCode => {
+                    const country = getCountryByCode(countryCode)
+                    return <span key={countryCode} className="country-flag" title={country?.name}>{country?.flag}</span>
+                  })}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    )
   }
 
   // Render analysis result view
@@ -1676,6 +1787,79 @@ function CorrelationView({
       <h2>Cross-Regional Analysis</h2>
       <p>Select articles from different countries to compare coverage, or use suggested analyses below.</p>
 
+      {/* Analysis Control Panel - Always visible at top */}
+      <div className="analysis-control-panel">
+        <div className="control-panel-left">
+          <span className="selection-count">
+            {selected.length} article{selected.length !== 1 ? 's' : ''} selected
+          </span>
+          {selected.length > 0 && (
+            <button
+              className="clear-selection-btn-small"
+              onClick={() => setSelected([])}
+            >
+              Clear
+            </button>
+          )}
+        </div>
+        <button
+          className={`run-correlation-top ${isAnalyzing ? 'working' : ''}`}
+          disabled={selected.length < 2 || isAnalyzing}
+          onClick={handleAnalyze}
+        >
+          {isAnalyzing ? (
+            <><span className="btn-spinner" /> Analyzing...</>
+          ) : (
+            `Analyze Selected (${selected.length})`
+          )}
+        </button>
+      </div>
+
+      {/* Past Analyses Widget - Always visible */}
+      <div className="past-analyses-widget">
+        <div className="past-analyses-header">
+          <h3>Past Analyses</h3>
+          {analysisHistory.length > 0 && (
+            <button
+              className="view-all-history-btn"
+              onClick={() => setViewMode('history')}
+            >
+              View All ({analysisHistory.length})
+            </button>
+          )}
+        </div>
+        {analysisHistory.length === 0 ? (
+          <div className="no-history-message">
+            No analyses yet. Select articles and click "Analyze" to create your first cross-regional analysis.
+          </div>
+        ) : (
+          <div className="past-analyses-list">
+            {analysisHistory.slice(0, 4).map(result => (
+              <button
+                key={result.id}
+                className="past-analysis-card"
+                onClick={() => { onViewResult?.(result); setViewMode('result') }}
+              >
+                <div className="past-analysis-flags">
+                  {Object.keys(result.perspectivesByCountry).slice(0, 4).map(countryCode => {
+                    const country = getCountryByCode(countryCode)
+                    return <span key={countryCode} className="flag-mini">{country?.flag}</span>
+                  })}
+                  {Object.keys(result.perspectivesByCountry).length > 4 && (
+                    <span className="flag-more">+{Object.keys(result.perspectivesByCountry).length - 4}</span>
+                  )}
+                </div>
+                <div className="past-analysis-topic">{result.topic}</div>
+                <div className="past-analysis-meta">
+                  <span>{result.articles.length} articles</span>
+                  <span>{new Date(result.timestamp).toLocaleDateString()}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Suggested Analyses */}
       {suggestedAnalyses.length > 0 && (
         <div className="suggested-analyses">
@@ -1703,28 +1887,8 @@ function CorrelationView({
         </div>
       )}
 
-      {/* Previous Analysis Results */}
-      {analysisHistory.length > 0 && (
-        <div className="previous-analyses">
-          <h3>Previous Analyses</h3>
-          <div className="previous-list">
-            {analysisHistory.slice(0, 3).map(result => (
-              <button
-                key={result.id}
-                className="previous-item"
-                onClick={() => { onViewResult?.(result); setViewMode('result') }}
-              >
-                <span className="prev-topic">{result.topic}</span>
-                <span className="prev-articles">{result.articles.length} articles</span>
-                <span className="prev-date">{new Date(result.timestamp).toLocaleDateString()}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
       <div className="all-articles-header">
-        <h3>All Articles</h3>
+        <h3>All Articles ({filteredArticles.length})</h3>
         {(searchQuery || selectedSource) && (
           <div className="selection-actions">
             {searchQuery && (
@@ -1742,18 +1906,10 @@ function CorrelationView({
                 }}
                 title={`Select all ${filteredArticles.length} matching articles`}
               >
-                Select All Matching ({filteredArticles.length})
+                Select All Matching
               </button>
             )}
           </div>
-        )}
-        {selected.length > 0 && (
-          <button
-            className="clear-selection-btn"
-            onClick={() => setSelected([])}
-          >
-            Clear Selection ({selected.length})
-          </button>
         )}
       </div>
 
@@ -1835,18 +1991,6 @@ function CorrelationView({
           )
         })}
       </div>
-
-      <button
-        className={`run-correlation ${isAnalyzing ? 'working' : ''}`}
-        disabled={selected.length < 2 || isAnalyzing}
-        onClick={handleAnalyze}
-      >
-        {isAnalyzing ? (
-          <><span className="btn-spinner" /> Analyzing...</>
-        ) : (
-          `Analyze ${selected.length} Articles`
-        )}
-      </button>
     </div>
   )
 }
