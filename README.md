@@ -8,13 +8,13 @@ LibreNews is an open-source desktop application that helps users understand how 
 
 ## Screenshots
 
-### News Feed with Coverage Timeline
-Browse articles with an interactive timeline showing coverage distribution over time. Filter by date range, sort by relevance or recency, and see political spectrum distribution at a glance.
+### News Feed - Ungrouped View
+Browse articles from multiple international sources in a clean, responsive tile layout. Each article shows source trust ratings, political orientation, and misinformation status at a glance.
 
-![News Feed with Timeline](screenshots/NewsFeedViewGrouped.png)
+![News Feed Ungrouped](screenshots/NewsFeedOverviewUngrouped.png)
 
 ### News Feed - Grouped by Story
-Related articles from different sources are automatically grouped together with coverage spectrum bars, blindspot alerts, and importance scores. Each group shows political distribution and source diversity.
+Related articles from different sources are automatically grouped together with coverage spectrum bars, blindspot alerts, and importance scores. Each group shows political distribution and source diversity. Features interactive timeline, sort by relevance or recency, and date range filtering.
 
 ![News Feed Grouped](screenshots/NewsFeedOverviewGrouped.png)
 
