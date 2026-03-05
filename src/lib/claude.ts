@@ -212,6 +212,12 @@ export async function correlateArticles(
   perspectivesByOrientation: Record<string, string>
   commonGround: string[]
   divergences: string[]
+  blindspotAnalysis?: {
+    missingPerspectives: string[]
+    potentialOmissions: string[]
+    underreportedAngles: string[]
+    recommendation: string
+  }
 }> {
   const countriesList = articles.map(a => a.country).join(', ')
   const orientations = [...new Set(articles.map(a => a.orientation))]
@@ -219,13 +225,19 @@ export async function correlateArticles(
     `Article ${i + 1} (${a.source}, ${a.country}, Political Orientation: ${a.orientation}):\nTitle: ${a.title}\nContent: ${a.content.substring(0, 1500)}`
   ).join('\n\n---\n\n')
 
-  const systemPrompt = `You are a cross-regional news analyst. You analyze how different countries and political orientations cover the same news story. Always respond with valid JSON only, no markdown formatting, no code blocks, just raw JSON.`
+  // Determine which perspectives are missing
+  const allOrientations = ['left', 'center-left', 'center', 'center-right', 'right', 'state']
+  const missingOrientations = allOrientations.filter(o => !orientations.includes(o))
+
+  const systemPrompt = `You are a cross-regional news analyst specializing in media bias detection and blindspot analysis. You analyze how different countries and political orientations cover the same news story, with special attention to what perspectives might be missing or underrepresented. Always respond with valid JSON only, no markdown formatting, no code blocks, just raw JSON.`
 
   const prompt = `Analyze these ${articles.length} news articles from different countries (${countriesList}) and political orientations (${orientations.join(', ')}) covering the same topic.
 
 ${articlesText}
 
-Provide a comprehensive cross-regional and political analysis in the following JSON format:
+NOTE: The following political perspectives are NOT represented in these articles: ${missingOrientations.join(', ') || 'None - all perspectives covered'}
+
+Provide a comprehensive cross-regional and political analysis INCLUDING BLINDSPOT ANALYSIS in the following JSON format:
 
 {
   "topic": "A clear, concise description of the main topic being covered",
@@ -247,13 +259,21 @@ Provide a comprehensive cross-regional and political analysis in the following J
   "divergences": [
     "Key difference in how sources cover this story",
     "Another significant divergence in framing or emphasis"
-  ]
+  ],
+  "blindspotAnalysis": {
+    "missingPerspectives": ["List perspectives or viewpoints that are not represented in this coverage"],
+    "potentialOmissions": ["Facts, context, or angles that these sources might be collectively ignoring or downplaying"],
+    "underreportedAngles": ["Aspects of this story that deserve more attention but are being minimized"],
+    "recommendation": "A suggestion for what additional sources or perspectives the reader should seek out to get a fuller picture"
+  }
 }
 
 Important:
 - Include a perspective entry for each country represented in the articles (${countriesList}).
 - Include perspective entries for each political orientation present: ${orientations.join(', ')}.
 - Highlight how political bias affects the framing of this news story.
+- In blindspotAnalysis, identify what's MISSING from the coverage - what aren't these sources telling the reader?
+- Consider: What facts might be inconvenient for certain political orientations? What context is being left out?
 Respond with ONLY the JSON object, no additional text or formatting.`
 
   const response = await sendMessage(prompt, systemPrompt, 8192, 'cross_regional_analysis')
@@ -282,7 +302,8 @@ Respond with ONLY the JSON object, no additional text or formatting.`
       perspectivesByCountry: parsed.perspectivesByCountry || {},
       perspectivesByOrientation: parsed.perspectivesByOrientation || {},
       commonGround: Array.isArray(parsed.commonGround) ? parsed.commonGround : [],
-      divergences: Array.isArray(parsed.divergences) ? parsed.divergences : []
+      divergences: Array.isArray(parsed.divergences) ? parsed.divergences : [],
+      blindspotAnalysis: parsed.blindspotAnalysis || undefined
     }
   } catch (err) {
     console.error('Failed to parse correlation response:', err, 'Response:', response)
@@ -294,7 +315,8 @@ Respond with ONLY the JSON object, no additional text or formatting.`
       perspectivesByCountry: {},
       perspectivesByOrientation: {},
       commonGround: [],
-      divergences: []
+      divergences: [],
+      blindspotAnalysis: undefined
     }
   }
 }

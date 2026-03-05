@@ -4,34 +4,34 @@
 
 LibreNews is an open-source desktop application that helps users understand how news stories are covered differently across countries, political orientations, and media sources. By aggregating news from multiple international sources and leveraging AI analysis, LibreNews empowers users to see beyond their local media bubble and develop a more nuanced understanding of global events.
 
+*Last updated: March 5, 2026*
+
 ## Screenshots
 
-### News Feed - Tile View
-Browse articles from multiple international sources in a clean, responsive tile layout. Each article shows source trust ratings, political orientation, and misinformation status at a glance.
+### News Feed with Coverage Timeline
+Browse articles with an interactive timeline showing coverage distribution over time. Filter by date range, sort by relevance or recency, and see political spectrum distribution at a glance.
 
-![News Feed Ungrouped](screenshots/NewsFeedOverviewUngrouped.png)
+![News Feed with Timeline](screenshots/NewsFeedViewGrouped.png)
 
 ### News Feed - Grouped by Story
-Related articles from different sources are automatically grouped together, making it easy to compare coverage of the same event.
+Related articles from different sources are automatically grouped together with coverage spectrum bars, blindspot alerts, and importance scores. Each group shows political distribution and source diversity.
 
 ![News Feed Grouped](screenshots/NewsFeedOverviewGrouped.png)
 
-![News Feed Grouped Detail](screenshots/NewsFeedOverviewGrouped2.png)
-
 ### Cross-Regional Analysis
-Select articles from different countries and political orientations to run AI-powered comparative analysis. See how the same story is framed differently across regions.
+Select articles from different countries and political orientations to run AI-powered comparative analysis. Includes suggested analyses sorted by relevance or recency, with blindspot detection.
 
 ![Cross Regional Analysis Selection](screenshots/CrossRegionalView1.png)
 
 ![Cross Regional Analysis Results](screenshots/CrossRegionalView2.png)
 
 ### API Transparency Log
-Full visibility into every AI operation, including token usage and costs. Know exactly what you're spending.
+Full visibility into every AI operation, including token usage, costs, and monthly budget tracking. Know exactly what you're spending with pay-as-you-go support.
 
 ![API Transparency Log](screenshots/APITransparencyLog.png)
 
 ### Settings & Configuration
-Configure API credentials, cost controls, and manage your news sources.
+Configure API credentials, cost controls, source categories, and manage your news sources.
 
 ![Settings](screenshots/Settings1.png)
 
@@ -57,6 +57,7 @@ In an era of increasing media fragmentation and polarization, it's more importan
 - Analyze perspectives by political orientation (Left, Center, Right, State-affiliated)
 - Identify common ground and key divergences between sources
 - Automatic grouping of related articles with smart cluster naming
+- **Blindspot Analysis**: Identify missing perspectives and underreported angles
 
 ### AI-Powered Insights
 - **Bias Analysis**: Detect political lean in article framing
@@ -64,6 +65,14 @@ In an era of increasing media fragmentation and polarization, it's more importan
 - **Fake News Detection**: Flag potential misinformation with prominent warnings
 - **Image Analysis**: Check images for manipulation or misleading content
 - **Translation**: Translate articles to your preferred language
+- **Blindspot Detection**: Identify when coverage is one-sided or missing perspectives
+
+### Coverage Analysis (Ground.news-inspired)
+- **Coverage Spectrum Bar**: Visual representation of political distribution (Left/Center/Right/State)
+- **Blindspot Alerts**: Warnings when stories lack coverage from certain political perspectives
+- **Importance Scoring**: Stories ranked by coverage breadth, geographic spread, and political diversity
+- **Interactive Timeline**: Filter articles by date range with visual coverage distribution
+- **Source Diversity Badges**: See how many sources and countries cover each story
 
 ### User Experience
 - Clean, newspaper-inspired interface
@@ -72,12 +81,17 @@ In an era of increasing media fragmentation and polarization, it's more importan
 - One-click cross-regional analysis for any group
 - Filter by topic, source, or trending status
 - Search across all articles
+- **Sort by relevance or newest first**
+- **Comprehensive tooltips** explaining all metrics and indicators
+- **Suggested analyses** with relevance/recency sorting
 
 ### Transparency & Control
 - **Full API Cost Tracking**: See exactly how much each AI operation costs
+- **Monthly Budget Monitoring**: Track spending against your budget with visual progress bar
 - **Cost Control Settings**: Disable automatic AI features to manage spending
 - **API Transparency Log**: Review every Claude API call with token counts and costs
 - **Configurable Automation**: Choose which AI features run automatically vs. on-demand
+- **Source Categories**: Create custom categories to organize news sources
 
 ## Technology Stack
 

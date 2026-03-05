@@ -95,6 +95,11 @@ export interface UserPreferences {
   autoDetectFakeNews: boolean
   autoAnalyzeImages: boolean
   autoTranslateOnFetch: boolean
+  // Budget settings
+  monthlyBudgetUSD: number // User-set monthly budget limit
+  budgetAlertThreshold: number // Percentage at which to warn (e.g., 80)
+  // Custom source categories
+  sourceCategories: Record<string, string[]> // categoryName -> [sourceName, ...]
 }
 
 interface LibreNewsDB extends DBSchema {

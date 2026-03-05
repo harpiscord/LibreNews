@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import './App.css'
 import { useAuth } from './hooks/useAuth'
 import { usePreferences } from './hooks/usePreferences'
@@ -6,6 +6,17 @@ import { useArticles } from './hooks/useArticles'
 import { countries, getCountryByCode, orientationLabels, topics, trustLevelLabels, getSourceTrust, languageNames } from './lib/countries'
 import { initDB, Article, getClaudeHistory, ClaudeRequest, ClaudeResponse } from './lib/db'
 import { correlateArticles } from './lib/claude'
+import {
+  calculateCoverageSpectrum,
+  detectBlindspot,
+  calculateImportanceScore,
+  getRelativeTime,
+  getFreshnessClass,
+  filterArticlesByDateRange,
+  generateTimelineData
+} from './lib/coverage'
+import { CoverageSpectrumBar, BlindspotAlert, SourceCountBadge } from './components/CoverageSpectrum'
+import { CoverageTimeline } from './components/CoverageTimeline'
 
 // Cross-regional analysis result interface
 interface AnalysisResult {
@@ -18,6 +29,12 @@ interface AnalysisResult {
   perspectivesByOrientation: Record<string, string>
   commonGround: string[]
   divergences: string[]
+  blindspotAnalysis?: {
+    missingPerspectives: string[]
+    potentialOmissions: string[]
+    underreportedAngles: string[]
+    recommendation: string
+  }
 }
 
 // Cluster/group information
@@ -534,9 +551,9 @@ function App() {
 
           <button
             className={`refresh-btn ${articleHooks.isFetching ? 'working' : ''}`}
-            onClick={() => articleHooks.fetchNews(preferences.selectedCountries)}
-            disabled={articleHooks.isFetching || preferences.selectedCountries.length === 0}
-            title={preferences.selectedCountries.length === 0 ? 'Select countries first' : 'Fetch latest news from all sources'}
+            onClick={() => articleHooks.fetchNews(preferences.selectedCountries, customFeeds)}
+            disabled={articleHooks.isFetching || (preferences.selectedCountries.length === 0 && customFeeds.length === 0)}
+            title={(preferences.selectedCountries.length === 0 && customFeeds.length === 0) ? 'Select countries or add custom feeds first' : 'Fetch latest news from all sources'}
           >
             {articleHooks.isFetching ? <span className="btn-spinner" /> : <span className="refresh-icon">↻</span>}
             <span className="refresh-text">
@@ -637,7 +654,12 @@ function App() {
               selectedTopic={selectedTopic}
             />
           )}
-          {currentView === 'logs' && <LogsView />}
+          {currentView === 'logs' && (
+            <LogsView
+              monthlyBudget={preferences.monthlyBudgetUSD || 10}
+              onBudgetChange={(budget) => updatePreferences({ monthlyBudgetUSD: budget })}
+            />
+          )}
           {currentView === 'settings' && (
             <SettingsView
               preferences={preferences}
@@ -646,6 +668,7 @@ function App() {
               onManageCountries={() => setShowWizard(true)}
               selectedCountries={preferences.selectedCountries}
               authHook={auth}
+              customFeeds={customFeeds}
             />
           )}
         </div>
@@ -695,10 +718,26 @@ function App() {
         <GroupModal
           articleId={showGroupModal}
           articleTitle={articleHooks.articles.find(a => a.id === showGroupModal)?.title || ''}
-          existingClusters={articleClusters}
+          existingClusters={(() => {
+            // Build clusters from all articles with clusterIds, not just the articleClusters state
+            const clusterMap: Record<string, { id: string; name: string; articleIds: string[] }> = {}
+            for (const article of articleHooks.articles) {
+              if (article.clusterId) {
+                if (!clusterMap[article.clusterId]) {
+                  clusterMap[article.clusterId] = {
+                    id: article.clusterId,
+                    name: article.clusterName || getClusterDisplayName(article.clusterId),
+                    articleIds: []
+                  }
+                }
+                clusterMap[article.clusterId].articleIds.push(article.id)
+              }
+            }
+            return Object.values(clusterMap)
+          })()}
           onAddToGroup={(clusterId) => {
-            const cluster = articleClusters.find(c => c.id === clusterId)
-            handleAddToGroup(showGroupModal, clusterId, cluster?.name)
+            const clusterName = getClusterDisplayName(clusterId)
+            handleAddToGroup(showGroupModal, clusterId, clusterName)
           }}
           onCreateGroup={(groupName) => handleCreateGroup(showGroupModal, groupName)}
           onClose={() => setShowGroupModal(null)}
@@ -1007,8 +1046,15 @@ function FeedView({
   const [analyzingId, setAnalyzingId] = useState<string | null>(null)
   const [translatingId, setTranslatingId] = useState<string | null>(null)
   const [checkingFakeNewsId, setCheckingFakeNewsId] = useState<string | null>(null)
+  const [timelineStartDate, setTimelineStartDate] = useState<Date | null>(null)
+  const [timelineEndDate, setTimelineEndDate] = useState<Date | null>(null)
+  const [timelineSearch, setTimelineSearch] = useState('')
+  const [sortMode, setSortMode] = useState<'relevant' | 'newest'>('relevant')
 
-  // Filter by topic, trending, search, and source
+  // Combined search (top bar + timeline)
+  const effectiveSearchQuery = timelineSearch || searchQuery
+
+  // Filter by topic, trending, search, source, and date range
   const filteredArticles = useMemo(() => {
     let result = articles
     if (selectedSource) {
@@ -1020,8 +1066,8 @@ function FeedView({
     if (showTrendingOnly) {
       result = result.filter(a => a.isTrending)
     }
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase()
+    if (effectiveSearchQuery.trim()) {
+      const query = effectiveSearchQuery.toLowerCase()
       result = result.filter(a =>
         a.title.toLowerCase().includes(query) ||
         a.content.toLowerCase().includes(query) ||
@@ -1029,18 +1075,31 @@ function FeedView({
         (a.translatedContent?.toLowerCase().includes(query))
       )
     }
+    // Apply date range filter from timeline
+    if (timelineStartDate || timelineEndDate) {
+      result = filterArticlesByDateRange(result, timelineStartDate, timelineEndDate)
+    }
     return result
-  }, [articles, selectedTopic, showTrendingOnly, searchQuery, selectedSource])
+  }, [articles, selectedTopic, showTrendingOnly, effectiveSearchQuery, selectedSource, timelineStartDate, timelineEndDate])
 
   // Count trending articles
   const trendingCount = useMemo(() => {
     return articles.filter(a => a.isTrending).length
   }, [articles])
 
-  // Group articles by cluster and sort by group size (multi-article groups first)
+  // Group articles by cluster and sort based on selected mode
   const groupedArticles = useMemo(() => {
     if (!groupByStory) {
-      return filteredArticles.map(a => ({ articles: [a], clusterId: '' }))
+      const ungroupedArticles = filteredArticles.map(a => ({ articles: [a], clusterId: '' }))
+      // Sort ungrouped articles
+      if (sortMode === 'newest') {
+        return ungroupedArticles.sort((a, b) => {
+          const dateA = new Date(a.articles[0].publishedAt).getTime()
+          const dateB = new Date(b.articles[0].publishedAt).getTime()
+          return dateB - dateA
+        })
+      }
+      return ungroupedArticles
     }
 
     const clusters: Record<string, Article[]> = {}
@@ -1062,14 +1121,23 @@ function FeedView({
       ...ungrouped.map(a => ({ clusterId: '', articles: [a] }))
     ]
 
-    // Sort by date (most recent first)
-    return result.sort((a, b) => {
-      // Get the most recent article date from each group
-      const dateA = Math.max(...a.articles.map(art => new Date(art.publishedAt).getTime()))
-      const dateB = Math.max(...b.articles.map(art => new Date(art.publishedAt).getTime()))
-      return dateB - dateA
-    })
-  }, [filteredArticles, groupByStory])
+    // Sort based on selected mode
+    if (sortMode === 'newest') {
+      // Sort by newest article in each group
+      return result.sort((a, b) => {
+        const newestA = Math.max(...a.articles.map(art => new Date(art.publishedAt).getTime()))
+        const newestB = Math.max(...b.articles.map(art => new Date(art.publishedAt).getTime()))
+        return newestB - newestA
+      })
+    } else {
+      // Sort by importance score (calculated from coverage breadth, diversity, recency)
+      return result.sort((a, b) => {
+        const importanceA = calculateImportanceScore(a.articles)
+        const importanceB = calculateImportanceScore(b.articles)
+        return importanceB - importanceA
+      })
+    }
+  }, [filteredArticles, groupByStory, sortMode])
 
   const topicInfo = topics.find(t => t.id === selectedTopic)
 
@@ -1092,8 +1160,26 @@ function FeedView({
     setCheckingFakeNewsId(null)
   }
 
+  // Handle date range selection from timeline
+  const handleDateRangeSelect = useCallback((start: Date | null, end: Date | null) => {
+    setTimelineStartDate(start)
+    setTimelineEndDate(end)
+  }, [])
+
   return (
     <div>
+      {/* Coverage Timeline - Sticky at top */}
+      {articles.length > 0 && (
+        <CoverageTimeline
+          articles={articles}
+          onDateRangeSelect={handleDateRangeSelect}
+          selectedStartDate={timelineStartDate}
+          selectedEndDate={timelineEndDate}
+          searchQuery={timelineSearch}
+          onSearchChange={setTimelineSearch}
+        />
+      )}
+
       <div className="feed-header">
         <h2>{title}</h2>
         <span className="feed-date">{today}</span>
@@ -1103,21 +1189,61 @@ function FeedView({
         {showTrendingOnly && (
           <span className="feed-trending-badge">🔥 Trending Only</span>
         )}
-        {searchQuery && (
-          <span className="feed-search-badge">🔍 "{searchQuery}"</span>
+        {effectiveSearchQuery && (
+          <span className="feed-search-badge">🔍 "{effectiveSearchQuery}"</span>
         )}
         {selectedSource && (
           <span className="feed-source-badge">📰 {selectedSource}</span>
         )}
+        {(timelineStartDate || timelineEndDate) && (
+          <span className="feed-date-badge">📅 Date filtered</span>
+        )}
+        <div className="sort-toggle">
+          <button
+            className={`sort-btn ${sortMode === 'relevant' ? 'active' : ''}`}
+            onClick={() => setSortMode('relevant')}
+            title="Sort by relevance: Stories with more sources, broader geographic coverage, and political diversity appear first"
+          >
+            ⚡ Most Relevant
+          </button>
+          <button
+            className={`sort-btn ${sortMode === 'newest' ? 'active' : ''}`}
+            onClick={() => setSortMode('newest')}
+            title="Sort by time: Most recently published articles appear first"
+          >
+            🕐 Newest First
+          </button>
+        </div>
         <span className="feed-count">{filteredArticles.length} articles {trendingCount > 0 && !showTrendingOnly && `(${trendingCount} trending)`}</span>
       </div>
 
       {filteredArticles.length === 0 ? (
         <div className="empty-state">
-          <h3>No articles yet</h3>
-          <p>{searchQuery ? 'No articles match your search' : 'Select countries and sources to start collecting news'}</p>
-          {onAddArticle && !searchQuery && (
-            <button onClick={onAddArticle}>Configure Sources</button>
+          <h3>No articles found</h3>
+          {(timelineStartDate || timelineEndDate) ? (
+            <>
+              <p>No articles found for the selected date range.</p>
+              <p className="empty-state-hint">
+                {timelineStartDate && timelineEndDate
+                  ? `${timelineStartDate.toLocaleDateString()} - ${timelineEndDate.toLocaleDateString()}`
+                  : timelineStartDate?.toLocaleDateString()
+                }
+              </p>
+              <p className="empty-state-tip">
+                Articles are only available if they were fetched when originally published.
+                Try clicking "Refresh" to fetch the latest news, or select a different date range.
+              </p>
+              <button onClick={() => handleDateRangeSelect(null, null)}>Clear Date Filter</button>
+            </>
+          ) : searchQuery ? (
+            <p>No articles match your search for "{searchQuery}"</p>
+          ) : (
+            <>
+              <p>Select countries and sources to start collecting news</p>
+              {onAddArticle && (
+                <button onClick={onAddArticle}>Configure Sources</button>
+              )}
+            </>
           )}
         </div>
       ) : (
@@ -1131,37 +1257,63 @@ function FeedView({
               clusterName = title.length > 50 ? title.substring(0, 50) + '...' : title
             }
             clusterName = clusterName || 'Related Stories'
+            // Calculate coverage metrics for the group
+            const spectrum = calculateCoverageSpectrum(group.articles)
+            const blindspot = detectBlindspot(spectrum)
+            const importanceScore = calculateImportanceScore(group.articles)
+            const newestDate = new Date(Math.max(...group.articles.map(a => new Date(a.publishedAt).getTime())))
+
             return (
               <div key={groupIdx} className={`article-group ${group.articles.length > 1 ? 'multi' : ''}`}>
                 {group.articles.length > 1 && (
-                  <div className="group-header">
-                    <span className="group-icon">&#128279;</span>
-                    <span className="group-name">{clusterName}</span>
-                    <span className="group-count">{group.articles.length} sources</span>
-                    {group.articles[0]?.isTrending && (
-                      <span className="trending-badge" title={`Trending Score: ${group.articles[0]?.trendingScore}`}>
-                        🔥 Trending
+                  <div className="cluster-header-enhanced">
+                    <div className="cluster-title-row">
+                      <span className="group-icon">&#128279;</span>
+                      <span className="group-name">{clusterName}</span>
+                      <span
+                        className={`relative-time ${getFreshnessClass(newestDate)}`}
+                        title={`Most recent article: ${newestDate.toLocaleString()}. Fresh (<6h) = green, Recent (<24h) = yellow, Older = gray.`}
+                      >
+                        {getRelativeTime(newestDate)}
                       </span>
-                    )}
-                    {onAnalyzeGroup && group.articles.length >= 2 && (
-                      <button
-                        className="analyze-group-btn"
-                        onClick={() => onAnalyzeGroup(group.articles.map(a => a.id))}
-                        disabled={isAnalyzingGroup}
-                        title="Run cross-regional analysis on this group"
-                      >
-                        {isAnalyzingGroup ? '⏳ Analyzing...' : '🔍 Analyze Group'}
-                      </button>
-                    )}
-                    {onMergeCluster && group.clusterId && (
-                      <button
-                        className="merge-btn"
-                        onClick={() => onMergeCluster(group.clusterId)}
-                        title="Merge with another group"
-                      >
-                        ⊕ Merge
-                      </button>
-                    )}
+                      {importanceScore >= 60 && (
+                        <span
+                          className={`importance-badge ${importanceScore >= 80 ? 'high' : 'medium'}`}
+                          title={`Importance Score: ${importanceScore}/100 - Based on coverage breadth (number of sources), geographic spread (countries), political diversity, and recency. Higher = more significant story.`}
+                        >
+                          ⚡ {importanceScore}
+                        </span>
+                      )}
+                      {group.articles[0]?.isTrending && (
+                        <span className="trending-badge" title={`Trending Score: ${group.articles[0]?.trendingScore} - Story is being covered by multiple sources across different countries, indicating high news value.`}>
+                          🔥 Trending
+                        </span>
+                      )}
+                    </div>
+                    <div className="cluster-metrics-row">
+                      <SourceCountBadge count={spectrum.sources.length} countries={spectrum.countries.length} />
+                      <CoverageSpectrumBar spectrum={spectrum} compact />
+                      <BlindspotAlert blindspot={blindspot} compact />
+                      {onAnalyzeGroup && group.articles.length >= 2 && (
+                        <button
+                          className="analyze-group-btn"
+                          onClick={() => onAnalyzeGroup(group.articles.map(a => a.id))}
+                          disabled={isAnalyzingGroup}
+                          title="Run cross-regional analysis on this group"
+                        >
+                          {isAnalyzingGroup ? '⏳ Analyzing...' : '🔍 Analyze'}
+                        </button>
+                      )}
+                      {onMergeCluster && group.clusterId && (
+                        <button
+                          className="merge-btn"
+                          onClick={() => onMergeCluster(group.clusterId)}
+                          title="Merge with another group"
+                        >
+                          ⊕ Merge
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )}
                 <div className="group-articles">
@@ -1307,12 +1459,18 @@ function ArticleCard({
       </p>
 
       {/* Fake News Status - Always visible */}
-      <div className={`fake-news-status ${
-        article.fakeNewsScore === undefined ? 'not-checked' :
-        article.fakeNewsScore > 70 ? 'critical' :
-        article.fakeNewsScore > 50 ? 'high' :
-        article.fakeNewsScore > 30 ? 'moderate' : 'ok'
-      }`}>
+      <div
+        className={`fake-news-status ${
+          article.fakeNewsScore === undefined ? 'not-checked' :
+          article.fakeNewsScore > 70 ? 'critical' :
+          article.fakeNewsScore > 50 ? 'high' :
+          article.fakeNewsScore > 30 ? 'moderate' : 'ok'
+        }`}
+        title={article.fakeNewsScore === undefined
+          ? 'Click "Check Misinfo" to run AI analysis for potential misinformation, unverified claims, and factual accuracy.'
+          : `Misinformation Risk Score: ${article.fakeNewsScore}% - AI-analyzed probability that this article contains misleading claims, factual errors, or propaganda. 0-30% = low risk, 30-50% = some concerns, 50-70% = elevated risk, 70%+ = high risk.`
+        }
+      >
         {article.fakeNewsScore === undefined ? (
           <>
             <span className="fake-news-icon">❓</span>
@@ -1350,20 +1508,20 @@ function ArticleCard({
         {article.trustScore !== undefined && (
           <span
             className={`indicator trust ${article.trustScore >= 70 ? 'high' : article.trustScore >= 40 ? 'medium' : 'low'}`}
-            title="Source reliability score"
+            title={`Trust Score: ${article.trustScore}% - AI assessment of source reliability based on fact-check record, editorial standards, and historical accuracy. 70%+ = highly reliable, 40-70% = moderate, <40% = low reliability.`}
           >
             Trust: {article.trustScore}%
           </span>
         )}
         {article.biasAnalysis && (
-          <span className="indicator bias" title={article.biasAnalysis.explanation}>
+          <span className="indicator bias" title={`Bias Analysis: ${article.biasAnalysis.score > 0.3 ? 'Right-leaning' : article.biasAnalysis.score < -0.3 ? 'Left-leaning' : 'Centrist'} (score: ${article.biasAnalysis.score.toFixed(2)}). ${article.biasAnalysis.explanation}`}>
             Bias: {article.biasAnalysis.score > 0.3 ? 'Right' : article.biasAnalysis.score < -0.3 ? 'Left' : 'Center'}
           </span>
         )}
         {article.imageAnalysis && (
           <span
             className={`indicator image ${article.imageAnalysis.misleadingScore > 50 ? 'warning' : 'ok'}`}
-            title={article.imageAnalysis.explanation}
+            title={`Image Analysis: Misleading score ${article.imageAnalysis.misleadingScore}%. ${article.imageAnalysis.explanation}. Checks for manipulation, out-of-context usage, and misleading framing.`}
           >
             Image: {article.imageAnalysis.misleadingScore > 50 ? '⚠️ Suspicious' : '✓ OK'}
           </span>
@@ -1482,6 +1640,7 @@ function CorrelationView({
   const [selected, setSelected] = useState<string[]>([])
   const [viewMode, setViewMode] = useState<'select' | 'result' | 'history'>('select')
   const [showAllHistory, setShowAllHistory] = useState(false)
+  const [suggestionSort, setSuggestionSort] = useState<'relevant' | 'recent'>('relevant')
 
   // Switch to result view when analysis completes
   useEffect(() => {
@@ -1513,7 +1672,16 @@ function CorrelationView({
 
   // Generate suggested cross-regional analyses
   const suggestedAnalyses = useMemo(() => {
-    const suggestions: Array<{ title: string; description: string; articleIds: string[]; countries: string[]; topic: string; confidence: number }> = []
+    const suggestions: Array<{
+      title: string
+      description: string
+      articleIds: string[]
+      countries: string[]
+      topic: string
+      confidence: number
+      newestArticleDate: Date
+      articleCount: number
+    }> = []
 
     // Find clusters with articles from multiple countries
     const clusterMap: Record<string, Article[]> = {}
@@ -1532,9 +1700,9 @@ function CorrelationView({
       if (uniqueCountries.length < 2) continue
 
       // Validate topic consistency - all articles should have the same topic
-      const topics = clusterArticles.map(a => a.topic).filter(Boolean)
+      const topicsArray = clusterArticles.map(a => a.topic).filter(Boolean)
       const topicCounts: Record<string, number> = {}
-      for (const topic of topics) {
+      for (const topic of topicsArray) {
         topicCounts[topic] = (topicCounts[topic] || 0) + 1
       }
 
@@ -1563,24 +1731,41 @@ function CorrelationView({
       const countryNames = uniqueCountries.map(c => getCountryByCode(c)?.name || c).join(', ')
       const clusterName = clusterArticles[0].clusterName || clusterArticles[0].title.substring(0, 60) + '...'
 
+      // Get newest article date for recency sorting
+      const newestArticleDate = new Date(Math.max(...clusterArticles.map(a => new Date(a.publishedAt).getTime())))
+
       suggestions.push({
         title: clusterName,
         description: `Compare coverage from ${countryNames}`,
         articleIds: clusterArticles.map(a => a.id),
         countries: uniqueCountries,
         topic: dominantTopic ? dominantTopic[0] : 'unknown',
-        confidence: Math.max(topicConsistency, avgTopicConfidence)
+        confidence: Math.max(topicConsistency, avgTopicConfidence),
+        newestArticleDate,
+        articleCount: clusterArticles.length
       })
     }
 
-    // Sort by confidence first, then by number of countries
-    return suggestions
-      .sort((a, b) => {
-        if (Math.abs(a.confidence - b.confidence) > 0.1) return b.confidence - a.confidence
-        return b.countries.length - a.countries.length
-      })
-      .slice(0, 5)
-  }, [articles])
+    // Sort based on selected mode
+    if (suggestionSort === 'recent') {
+      // Sort by most recent article first
+      return suggestions
+        .sort((a, b) => b.newestArticleDate.getTime() - a.newestArticleDate.getTime())
+        .slice(0, 8)
+    } else {
+      // Sort by relevance: confidence first, then by number of countries, then by article count
+      return suggestions
+        .sort((a, b) => {
+          // First by confidence
+          if (Math.abs(a.confidence - b.confidence) > 0.1) return b.confidence - a.confidence
+          // Then by number of countries
+          if (a.countries.length !== b.countries.length) return b.countries.length - a.countries.length
+          // Then by article count
+          return b.articleCount - a.articleCount
+        })
+        .slice(0, 8)
+    }
+  }, [articles, suggestionSort])
 
   const toggle = (id: string) => {
     setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
@@ -1826,6 +2011,56 @@ function CorrelationView({
             </ul>
           </div>
         )}
+
+        {/* Blindspot Analysis - What's Missing */}
+        {analysisResult.blindspotAnalysis && (
+          <div className="analysis-section blindspot-section">
+            <h4>👁️ Blindspot Analysis: What's Being Left Out</h4>
+            <p className="blindspot-intro">
+              This analysis identifies perspectives, facts, and angles that may be missing or underreported in the coverage above.
+            </p>
+
+            {analysisResult.blindspotAnalysis.missingPerspectives.length > 0 && (
+              <div className="blindspot-subsection">
+                <h5>Missing Perspectives</h5>
+                <ul>
+                  {analysisResult.blindspotAnalysis.missingPerspectives.map((item, i) => (
+                    <li key={i}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {analysisResult.blindspotAnalysis.potentialOmissions.length > 0 && (
+              <div className="blindspot-subsection">
+                <h5>Potential Omissions</h5>
+                <ul>
+                  {analysisResult.blindspotAnalysis.potentialOmissions.map((item, i) => (
+                    <li key={i}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {analysisResult.blindspotAnalysis.underreportedAngles.length > 0 && (
+              <div className="blindspot-subsection">
+                <h5>Underreported Angles</h5>
+                <ul>
+                  {analysisResult.blindspotAnalysis.underreportedAngles.map((item, i) => (
+                    <li key={i}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {analysisResult.blindspotAnalysis.recommendation && (
+              <div className="blindspot-recommendation">
+                <h5>Recommendation</h5>
+                <p>{analysisResult.blindspotAnalysis.recommendation}</p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     )
   }
@@ -1912,7 +2147,25 @@ function CorrelationView({
       {/* Suggested Analyses */}
       {suggestedAnalyses.length > 0 && (
         <div className="suggested-analyses">
-          <h3>Suggested Analyses</h3>
+          <div className="suggested-analyses-header">
+            <h3>Suggested Analyses</h3>
+            <div className="suggestion-sort-toggle">
+              <button
+                className={`suggestion-sort-btn ${suggestionSort === 'relevant' ? 'active' : ''}`}
+                onClick={() => setSuggestionSort('relevant')}
+                title="Sort by relevance: Stories with more sources and broader coverage appear first"
+              >
+                ⚡ Most Relevant
+              </button>
+              <button
+                className={`suggestion-sort-btn ${suggestionSort === 'recent' ? 'active' : ''}`}
+                onClick={() => setSuggestionSort('recent')}
+                title="Sort by time: Most recently updated stories appear first"
+              >
+                🕐 Most Recent
+              </button>
+            </div>
+          </div>
           <div className="suggestions-list">
             {suggestedAnalyses.map((suggestion, i) => (
               <div key={i} className="suggestion-card">
@@ -1923,7 +2176,15 @@ function CorrelationView({
                   })}
                 </div>
                 <div className="suggestion-title">{suggestion.title}</div>
-                <div className="suggestion-desc">{suggestion.description}</div>
+                <div className="suggestion-meta">
+                  <span className="suggestion-desc">{suggestion.description}</span>
+                  <span className="suggestion-recency" title={`Last updated: ${suggestion.newestArticleDate.toLocaleString()}`}>
+                    {getRelativeTime(suggestion.newestArticleDate)}
+                  </span>
+                  <span className="suggestion-article-count" title="Number of articles in this story cluster">
+                    {suggestion.articleCount} articles
+                  </span>
+                </div>
                 <button
                   onClick={() => setSelected(suggestion.articleIds)}
                   className="select-suggestion"
@@ -2045,10 +2306,12 @@ function CorrelationView({
 }
 
 // Logs View with comprehensive cost tracking
-function LogsView() {
+function LogsView({ monthlyBudget = 10, onBudgetChange }: { monthlyBudget?: number; onBudgetChange?: (budget: number) => void }) {
   const [requests, setRequests] = useState<ClaudeRequest[]>([])
   const [responses, setResponses] = useState<ClaudeResponse[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [editingBudget, setEditingBudget] = useState(false)
+  const [budgetInput, setBudgetInput] = useState(monthlyBudget.toString())
 
   useEffect(() => {
     async function loadHistory() {
@@ -2065,17 +2328,27 @@ function LogsView() {
     loadHistory()
   }, [])
 
-  // Calculate totals
+  // Calculate totals including this month's spending
   const totals = useMemo(() => {
     let totalInputTokens = 0
     let totalOutputTokens = 0
     let totalCost = 0
+    let thisMonthCost = 0
     const costByOperation: Record<string, { count: number; cost: number; inputTokens: number; outputTokens: number }> = {}
+
+    const now = new Date()
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
 
     for (const resp of responses) {
       totalInputTokens += resp.inputTokens || 0
       totalOutputTokens += resp.outputTokens || 0
       totalCost += resp.costUSD || 0
+
+      // Check if this response is from the current month
+      const respDate = new Date(resp.timestamp)
+      if (respDate >= monthStart) {
+        thisMonthCost += resp.costUSD || 0
+      }
 
       const op = resp.operation || 'unknown'
       if (!costByOperation[op]) {
@@ -2087,8 +2360,21 @@ function LogsView() {
       costByOperation[op].outputTokens += resp.outputTokens || 0
     }
 
-    return { totalInputTokens, totalOutputTokens, totalCost, costByOperation }
+    return { totalInputTokens, totalOutputTokens, totalCost, thisMonthCost, costByOperation }
   }, [responses])
+
+  // Budget calculations
+  const budgetUsedPercent = monthlyBudget > 0 ? (totals.thisMonthCost / monthlyBudget) * 100 : 0
+  const budgetRemaining = Math.max(0, monthlyBudget - totals.thisMonthCost)
+  const budgetStatus = budgetUsedPercent >= 100 ? 'danger' : budgetUsedPercent >= 80 ? 'warning' : 'safe'
+
+  const handleBudgetSave = () => {
+    const newBudget = parseFloat(budgetInput)
+    if (!isNaN(newBudget) && newBudget >= 0) {
+      onBudgetChange?.(newBudget)
+    }
+    setEditingBudget(false)
+  }
 
   // Map responses to requests for display
   const logsWithDetails = useMemo(() => {
@@ -2119,6 +2405,59 @@ function LogsView() {
       <h2>API Transparency Log</h2>
       <p className="logs-description">Complete transparency into all Claude API calls, token usage, and costs.</p>
 
+      {/* Budget Monitor - Always visible */}
+      <div className="budget-monitor">
+        <div className="budget-header">
+          <h4>Monthly Budget</h4>
+          {editingBudget ? (
+            <div className="budget-edit">
+              <span>$</span>
+              <input
+                type="number"
+                value={budgetInput}
+                onChange={(e) => setBudgetInput(e.target.value)}
+                min="0"
+                step="1"
+                autoFocus
+              />
+              <button onClick={handleBudgetSave}>Save</button>
+              <button onClick={() => setEditingBudget(false)}>Cancel</button>
+            </div>
+          ) : (
+            <button className="edit-budget-btn" onClick={() => { setBudgetInput(monthlyBudget.toString()); setEditingBudget(true) }}>
+              Edit Budget
+            </button>
+          )}
+        </div>
+        <div className="budget-bar" title={`Budget usage: ${budgetUsedPercent.toFixed(1)}% of your $${monthlyBudget.toFixed(2)} monthly budget`}>
+          <div
+            className={`budget-fill ${budgetStatus}`}
+            style={{ width: `${Math.min(100, budgetUsedPercent)}%` }}
+          />
+        </div>
+        <div className="budget-stats">
+          <span className="budget-spent" title="Total API cost incurred this calendar month">
+            This month: {formatCost(totals.thisMonthCost)} / ${monthlyBudget.toFixed(2)}
+          </span>
+          <span className={`budget-remaining ${budgetStatus}`} title={budgetStatus === 'danger' ? 'You have exceeded your monthly budget!' : 'Amount remaining before reaching budget limit'}>
+            {budgetStatus === 'danger'
+              ? `Over budget by ${formatCost(totals.thisMonthCost - monthlyBudget)}`
+              : `${formatCost(budgetRemaining)} remaining`
+            }
+          </span>
+        </div>
+        {budgetStatus === 'warning' && (
+          <div className="budget-warning">
+            ⚠️ You've used {budgetUsedPercent.toFixed(0)}% of your monthly budget
+          </div>
+        )}
+        {budgetStatus === 'danger' && (
+          <div className="budget-danger">
+            🚨 You've exceeded your monthly budget!
+          </div>
+        )}
+      </div>
+
       {isLoading ? (
         <div className="logs-loading">
           <span className="spinner" />
@@ -2134,8 +2473,12 @@ function LogsView() {
           {/* Summary Stats */}
           <div className="logs-summary">
             <div className="summary-card total-cost">
-              <div className="summary-label">Total Spent</div>
+              <div className="summary-label">Total Spent (All Time)</div>
               <div className="summary-value">{formatCost(totals.totalCost)}</div>
+            </div>
+            <div className="summary-card this-month">
+              <div className="summary-label">This Month</div>
+              <div className="summary-value">{formatCost(totals.thisMonthCost)}</div>
             </div>
             <div className="summary-card">
               <div className="summary-label">API Calls</div>
@@ -2221,7 +2564,8 @@ function SettingsView({
   onLogout,
   onManageCountries,
   selectedCountries,
-  authHook
+  authHook,
+  customFeeds = []
 }: {
   preferences: any
   onUpdate: (updates: any) => void
@@ -2229,8 +2573,58 @@ function SettingsView({
   onManageCountries: () => void
   selectedCountries: string[]
   authHook: ReturnType<typeof useAuth>
+  customFeeds?: Array<{ url: string; name: string; country: string }>
 }) {
   const [showCredentialsModal, setShowCredentialsModal] = useState(false)
+  const [newCategoryName, setNewCategoryName] = useState('')
+  const [showAddCategory, setShowAddCategory] = useState(false)
+
+  // Get all available sources from countries + custom feeds
+  const allSources = useMemo(() => {
+    const sources: Array<{ name: string; country: string; type: 'builtin' | 'custom' }> = []
+
+    // Add built-in sources from selected countries
+    for (const countryCode of selectedCountries) {
+      const country = getCountryByCode(countryCode)
+      if (country) {
+        for (const paper of country.newspapers) {
+          sources.push({ name: paper.name, country: countryCode, type: 'builtin' })
+        }
+      }
+    }
+
+    // Add custom feeds
+    for (const feed of customFeeds) {
+      sources.push({ name: feed.name, country: feed.country, type: 'custom' })
+    }
+
+    return sources
+  }, [selectedCountries, customFeeds])
+
+  const sourceCategories = preferences.sourceCategories || {}
+
+  const addCategory = () => {
+    if (newCategoryName.trim()) {
+      const updated = { ...sourceCategories, [newCategoryName.trim()]: [] }
+      onUpdate({ sourceCategories: updated })
+      setNewCategoryName('')
+      setShowAddCategory(false)
+    }
+  }
+
+  const deleteCategory = (categoryName: string) => {
+    const updated = { ...sourceCategories }
+    delete updated[categoryName]
+    onUpdate({ sourceCategories: updated })
+  }
+
+  const toggleSourceInCategory = (categoryName: string, sourceName: string) => {
+    const category = sourceCategories[categoryName] || []
+    const updated = category.includes(sourceName)
+      ? category.filter((s: string) => s !== sourceName)
+      : [...category, sourceName]
+    onUpdate({ sourceCategories: { ...sourceCategories, [categoryName]: updated } })
+  }
 
   return (
     <div className="settings-page">
@@ -2360,6 +2754,72 @@ function SettingsView({
         <button className="settings-btn" onClick={onManageCountries}>
           Manage Countries & Sources
         </button>
+      </div>
+
+      {/* Source Categories */}
+      <div className="settings-section">
+        <h3>📂 Source Categories</h3>
+        <p className="section-description">
+          Create custom categories to organize your news sources. Filter the newsfeed by category.
+        </p>
+
+        {Object.keys(sourceCategories).length === 0 ? (
+          <div className="empty-categories">
+            <p>No categories yet. Create one to organize your sources.</p>
+          </div>
+        ) : (
+          <div className="categories-list">
+            {Object.entries(sourceCategories).map(([categoryName, sources]) => (
+              <div key={categoryName} className="category-card">
+                <div className="category-header">
+                  <span className="category-name">{categoryName}</span>
+                  <span className="category-count">{(sources as string[]).length} sources</span>
+                  <button
+                    className="delete-category-btn"
+                    onClick={() => deleteCategory(categoryName)}
+                    title="Delete category"
+                  >
+                    ×
+                  </button>
+                </div>
+                <div className="category-sources">
+                  {allSources.map(source => (
+                    <label key={source.name} className="source-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={(sources as string[]).includes(source.name)}
+                        onChange={() => toggleSourceInCategory(categoryName, source.name)}
+                      />
+                      <span className="source-label">
+                        {source.name}
+                        {source.type === 'custom' && <span className="custom-badge">Custom</span>}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {showAddCategory ? (
+          <div className="add-category-form">
+            <input
+              type="text"
+              placeholder="Category name..."
+              value={newCategoryName}
+              onChange={(e) => setNewCategoryName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && addCategory()}
+              autoFocus
+            />
+            <button className="save-btn" onClick={addCategory}>Add</button>
+            <button className="cancel-btn" onClick={() => setShowAddCategory(false)}>Cancel</button>
+          </div>
+        ) : (
+          <button className="settings-btn" onClick={() => setShowAddCategory(true)}>
+            + Add Category
+          </button>
+        )}
       </div>
 
       {/* API Credentials */}

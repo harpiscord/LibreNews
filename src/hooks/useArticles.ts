@@ -104,9 +104,12 @@ export function useArticles() {
     setIsLoading(false)
   }, [])
 
-  const fetchNews = useCallback(async (selectedCountries: string[]) => {
-    if (selectedCountries.length === 0) {
-      setError('No countries selected')
+  const fetchNews = useCallback(async (
+    selectedCountries: string[],
+    customFeeds: Array<{ url: string; name: string; country: string }> = []
+  ) => {
+    if (selectedCountries.length === 0 && customFeeds.length === 0) {
+      setError('No countries or custom feeds selected')
       return
     }
 
@@ -124,6 +127,7 @@ export function useArticles() {
       factCheckRecord: string
     }> = []
 
+    // Add built-in feeds from selected countries
     for (const countryCode of selectedCountries) {
       const country = getCountryByCode(countryCode)
       if (country) {
@@ -139,6 +143,19 @@ export function useArticles() {
           })
         }
       }
+    }
+
+    // Add custom feeds
+    for (const customFeed of customFeeds) {
+      feeds.push({
+        rssUrl: customFeed.url,
+        sourceName: customFeed.name,
+        country: customFeed.country || 'XX', // XX for unknown country
+        orientation: 'center', // Default to center for custom feeds
+        language: 'en', // Default language
+        trustworthiness: 50, // Default trust score
+        factCheckRecord: 'unknown',
+      })
     }
 
     setFetchProgress({ current: 0, total: feeds.length })

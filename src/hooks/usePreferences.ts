@@ -14,6 +14,11 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   autoDetectFakeNews: false,
   autoAnalyzeImages: false,
   autoTranslateOnFetch: false,
+  // Budget settings
+  monthlyBudgetUSD: 10, // Default $10/month
+  budgetAlertThreshold: 80, // Warn at 80%
+  // Custom source categories
+  sourceCategories: {},
 }
 
 export function usePreferences() {
