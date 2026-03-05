@@ -1050,6 +1050,7 @@ function FeedView({
   const [timelineEndDate, setTimelineEndDate] = useState<Date | null>(null)
   const [timelineSearch, setTimelineSearch] = useState('')
   const [sortMode, setSortMode] = useState<'relevant' | 'newest'>('relevant')
+  const [activeTab, setActiveTab] = useState<string>('all') // 'all', 'ungrouped', or clusterId
 
   // Combined search (top bar + timeline)
   const effectiveSearchQuery = timelineSearch || searchQuery
@@ -1087,57 +1088,87 @@ function FeedView({
     return articles.filter(a => a.isTrending).length
   }, [articles])
 
-  // Group articles by cluster and sort based on selected mode
-  const groupedArticles = useMemo(() => {
-    if (!groupByStory) {
-      const ungroupedArticles = filteredArticles.map(a => ({ articles: [a], clusterId: '' }))
-      // Sort ungrouped articles
-      if (sortMode === 'newest') {
-        return ungroupedArticles.sort((a, b) => {
-          const dateA = new Date(a.articles[0].publishedAt).getTime()
-          const dateB = new Date(b.articles[0].publishedAt).getTime()
-          return dateB - dateA
-        })
-      }
-      return ungroupedArticles
-    }
-
-    const clusters: Record<string, Article[]> = {}
+  // Build clusters and ungrouped articles
+  const { clusters, ungroupedArticles, allGroups } = useMemo(() => {
+    const clustersMap: Record<string, Article[]> = {}
     const ungrouped: Article[] = []
 
     for (const article of filteredArticles) {
       if (article.clusterId) {
-        if (!clusters[article.clusterId]) {
-          clusters[article.clusterId] = []
+        if (!clustersMap[article.clusterId]) {
+          clustersMap[article.clusterId] = []
         }
-        clusters[article.clusterId].push(article)
+        clustersMap[article.clusterId].push(article)
       } else {
         ungrouped.push(article)
       }
     }
 
-    const result = [
-      ...Object.entries(clusters).map(([clusterId, arts]) => ({ clusterId, articles: arts })),
-      ...ungrouped.map(a => ({ clusterId: '', articles: [a] }))
-    ]
+    // Build groups with metadata for tabs
+    const groups = Object.entries(clustersMap).map(([clusterId, arts]) => {
+      const clusterName = arts[0]?.clusterName || arts[0]?.title?.substring(0, 40) + '...' || 'Story Group'
+      return {
+        clusterId,
+        articles: arts,
+        name: clusterName,
+        importanceScore: calculateImportanceScore(arts)
+      }
+    })
 
-    // Sort based on selected mode
+    // Sort groups by importance
     if (sortMode === 'newest') {
-      // Sort by newest article in each group
-      return result.sort((a, b) => {
+      groups.sort((a, b) => {
         const newestA = Math.max(...a.articles.map(art => new Date(art.publishedAt).getTime()))
         const newestB = Math.max(...b.articles.map(art => new Date(art.publishedAt).getTime()))
         return newestB - newestA
       })
     } else {
-      // Sort by importance score (calculated from coverage breadth, diversity, recency)
-      return result.sort((a, b) => {
-        const importanceA = calculateImportanceScore(a.articles)
-        const importanceB = calculateImportanceScore(b.articles)
-        return importanceB - importanceA
-      })
+      groups.sort((a, b) => b.importanceScore - a.importanceScore)
     }
-  }, [filteredArticles, groupByStory, sortMode])
+
+    return { clusters: clustersMap, ungroupedArticles: ungrouped, allGroups: groups }
+  }, [filteredArticles, sortMode])
+
+  // Get articles to display based on active tab
+  const displayedArticles = useMemo(() => {
+    if (activeTab === 'all') {
+      // Show all articles, grouped
+      const result = [
+        ...allGroups.map(g => ({ clusterId: g.clusterId, articles: g.articles })),
+        ...ungroupedArticles.map(a => ({ clusterId: '', articles: [a] }))
+      ]
+      return result
+    } else if (activeTab === 'ungrouped') {
+      // Show only ungrouped articles
+      return ungroupedArticles.map(a => ({ clusterId: '', articles: [a] }))
+    } else {
+      // Show specific cluster
+      const clusterArticles = clusters[activeTab] || []
+      return [{ clusterId: activeTab, articles: clusterArticles }]
+    }
+  }, [activeTab, allGroups, ungroupedArticles, clusters])
+
+  // Build tabs data
+  const tabs = useMemo(() => {
+    const tabList: Array<{ id: string; label: string; count: number; isGroup: boolean }> = [
+      { id: 'all', label: 'All Stories', count: filteredArticles.length, isGroup: false },
+      { id: 'ungrouped', label: 'Ungrouped', count: ungroupedArticles.length, isGroup: false },
+    ]
+
+    // Add tabs for each story group (only groups with 2+ articles)
+    for (const group of allGroups) {
+      if (group.articles.length >= 2) {
+        tabList.push({
+          id: group.clusterId,
+          label: group.name.length > 30 ? group.name.substring(0, 30) + '...' : group.name,
+          count: group.articles.length,
+          isGroup: true
+        })
+      }
+    }
+
+    return tabList
+  }, [filteredArticles.length, ungroupedArticles.length, allGroups])
 
   const topicInfo = topics.find(t => t.id === selectedTopic)
 
@@ -1217,6 +1248,25 @@ function FeedView({
         <span className="feed-count">{filteredArticles.length} articles {trendingCount > 0 && !showTrendingOnly && `(${trendingCount} trending)`}</span>
       </div>
 
+      {/* Story Group Tabs */}
+      {groupByStory && allGroups.length > 0 && (
+        <div className="feed-tabs-container">
+          <div className="feed-tabs">
+            {tabs.map(tab => (
+              <button
+                key={tab.id}
+                className={`feed-tab ${activeTab === tab.id ? 'active' : ''} ${tab.isGroup ? 'group-tab' : ''}`}
+                onClick={() => setActiveTab(tab.id)}
+                title={tab.isGroup ? `View only: ${tab.label}` : tab.label}
+              >
+                <span className="tab-label">{tab.label}</span>
+                <span className="tab-count">{tab.count}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {filteredArticles.length === 0 ? (
         <div className="empty-state">
           <h3>No articles found</h3>
@@ -1248,7 +1298,7 @@ function FeedView({
         </div>
       ) : (
         <div className="articles-grouped">
-          {groupedArticles.map((group, groupIdx) => {
+          {displayedArticles.map((group, groupIdx) => {
             // Get cluster name from first article or generate from title
             let clusterName = group.articles[0]?.clusterName
             if (!clusterName && group.articles.length > 1) {

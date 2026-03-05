@@ -236,6 +236,10 @@ export const countries: Country[] = [
       { name: 'La Nación', url: 'https://lanacion.com.ar', rssUrl: 'https://www.lanacion.com.ar/arc/outboundfeeds/rss/', orientation: 'center-right', language: 'es', trustworthiness: 75, factCheckRecord: 'good' },
       { name: 'Infobae', url: 'https://infobae.com', rssUrl: 'https://www.infobae.com/arc/outboundfeeds/rss/', orientation: 'center', language: 'es', trustworthiness: 72, factCheckRecord: 'mixed' },
       { name: 'Ámbito Financiero', url: 'https://ambito.com', rssUrl: 'https://www.ambito.com/rss/pages/home.xml', orientation: 'center-right', language: 'es', trustworthiness: 70, factCheckRecord: 'mixed' },
+      { name: 'Perfil', url: 'https://perfil.com', rssUrl: 'https://perfil.com/feed', orientation: 'center', language: 'es', trustworthiness: 68, factCheckRecord: 'mixed' },
+      { name: 'La Voz del Interior', url: 'https://lavoz.com.ar', rssUrl: 'https://www.lavoz.com.ar/arc/outboundfeeds/feeds/rss/?outputType=xml', orientation: 'center', language: 'es', trustworthiness: 70, factCheckRecord: 'mixed' },
+      // Left-leaning / Progressive
+      { name: 'Página/12', url: 'https://pagina12.com.ar', rssUrl: 'https://www.pagina12.com.ar/arc/outboundfeeds/rss/portada', orientation: 'left', language: 'es', trustworthiness: 60, factCheckRecord: 'mixed' },
       // English-language
       { name: 'Buenos Aires Herald', url: 'https://buenosairesherald.com', rssUrl: 'https://buenosairesherald.com/feed/', orientation: 'center', language: 'en', trustworthiness: 70, factCheckRecord: 'mixed' },
     ],
