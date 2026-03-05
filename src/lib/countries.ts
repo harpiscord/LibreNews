@@ -227,6 +227,19 @@ export const countries: Country[] = [
       { name: 'Kyiv Independent', url: 'https://kyivindependent.com', rssUrl: 'https://kyivindependent.com/feed/', orientation: 'center', language: 'en', trustworthiness: 78, factCheckRecord: 'good' },
     ],
   },
+  {
+    code: 'AR',
+    name: 'Argentina',
+    flag: '🇦🇷',
+    newspapers: [
+      // Major mainstream newspapers
+      { name: 'La Nación', url: 'https://lanacion.com.ar', rssUrl: 'https://www.lanacion.com.ar/arc/outboundfeeds/rss/', orientation: 'center-right', language: 'es', trustworthiness: 75, factCheckRecord: 'good' },
+      { name: 'Infobae', url: 'https://infobae.com', rssUrl: 'https://www.infobae.com/arc/outboundfeeds/rss/', orientation: 'center', language: 'es', trustworthiness: 72, factCheckRecord: 'mixed' },
+      { name: 'Ámbito Financiero', url: 'https://ambito.com', rssUrl: 'https://www.ambito.com/rss/pages/home.xml', orientation: 'center-right', language: 'es', trustworthiness: 70, factCheckRecord: 'mixed' },
+      // English-language
+      { name: 'Buenos Aires Herald', url: 'https://buenosairesherald.com', rssUrl: 'https://buenosairesherald.com/feed/', orientation: 'center', language: 'en', trustworthiness: 70, factCheckRecord: 'mixed' },
+    ],
+  },
 ]
 
 export function getCountryByCode(code: string): Country | undefined {
